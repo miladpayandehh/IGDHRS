@@ -2,22 +2,6 @@
 
 This repository contains the official implementation of **IGDHRS**, a novel hybrid recommender system that integrates graph-based user similarity, a Deep Denoising Graph Convolutional Autoencoder (DDGCAE), and an automata-driven adaptive thresholding mechanism. IGDHRS effectively addresses key challenges in recommendation systems, such as **data sparsity** and the **cold-start problem**, by combining auxiliary user/item metadata with graph-derived structural features.
 
-## 📚 Table of Contents
-
-- [Overview](#overview)
-- [Key Features](#key-features)
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Usage](#usage)
-- [Outputs](#outputs)
-- [Model Components](#model-components)
-- [Evaluation](#evaluation)
-- [Citation](#citation)
-- [License](#license)
-- [Contact](#contact)
-
-
-
 ## 📖 Overview
 
 IGDHRS constructs a **user similarity graph (SG)** using a dynamic threshold \( T_s \), which is automatically optimized via **Learning Automata (LA)** based on feedback from recommendation performance (e.g., RMSE, MAE, precision, recall). The system extracts **graph-based features**, merges them with **auxiliary user/item metadata**, and applies a **DDGCAE** to learn robust representations. Clustering and collaborative filtering are then applied to generate accurate recommendations.
