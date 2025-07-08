@@ -1,6 +1,6 @@
 # IGDHRS: Intelligent Graph-based Deep Hybrid Recommender System
 
-This repository contains the implementation of the IGDHRS model, a novel hybrid recommender system integrating graph-based user similarity, deep denoising graph convolutional autoencoder (DDGCAE), and automata-based adaptive thresholding for similarity graph construction. IGDHRS is designed to address sparsity and cold-start problems by combining auxiliary user/item features with graph structural information.
+This repository contains the implementation of the IGDHRS model, a novel hybrid recommender system integrating graph-based user similarity, deep denoising graph convolutional autoencoder (DDGCAE), and automata-based adaptive thresholding for similarity graph construction. IGDHRS is designed to address sparsity and cold-start problems by combining auxiliary user/item features with graph-derived information.
 
 ---
 
@@ -111,3 +111,41 @@ Cluster assignments saved in outputs/clusters.npy.
 Predicted rating matrix saved in outputs/predicted_ratings.npy.
 Logs and intermediate files saved in outputs/logs/.
 
+##Model Details
+
+#Similarity Graph Construction
+The Learning Automata selects one of three actions: Increase, Decrease, or Unchanged to update similarity threshold Ts.
+Feedback is derived from changes in RMSE, MAE, Precision, and Recall metrics.
+Probability updates follow the Linear Reward-Penalty (LRP) scheme or variants.
+
+#Feature Extraction
+Six graph features: PageRank, Degree Centrality, Closeness Centrality, Betweenness Centrality, Load Centrality, Average Neighbor Degree.
+Auxiliary features one-hot encoded and concatenated.
+
+#DDGCAE
+Multi-layer spectral graph convolutional network.
+Input corrupted multiple times for marginalization.
+Closed-form weight updates for efficient training.
+Final embeddings used for clustering.
+
+#Clustering & Recommendation
+Spectral clustering on symmetrized kernel matrix.
+New users assigned based on cosine similarity.
+Predicted ratings estimated by averaging cluster member ratings.
+
+
+#Evaluation
+Supports evaluation metrics: RMSE, MAE, Precision@k, Recall@k.
+Evaluation results logged per iteration.
+Early stopping based on validation performance is supported.
+
+#License
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+##Contact
+
+For questions or collaboration, please contact:
+
+Milad Payandeh
+[milad71payandeh@gmail.com]
+[https://miladpayandeh.com/]
