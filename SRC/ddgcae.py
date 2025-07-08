@@ -1,90 +1,107 @@
 # MIT License
-# 
 # Copyright (c) 2025 Milad Payandeh
-# 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-# 
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE
+# https://opensource.org/licenses/MIT
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+import numpy as np
+from sklearn.cluster import SpectralClustering
+from scipy.sparse import csr_matrix
 
-class GraphConvolution(nn.Module):
-    """
-    Single graph convolutional layer based on Kipf and Welling (2017).
-    """
-    def __init__(self, in_features, out_features):
-        super(GraphConvolution, self).__init__()
-        self.weight = nn.Parameter(torch.FloatTensor(in_features, out_features))
-        nn.init.xavier_uniform_(self.weight)
-    
-    def forward(self, input, adj_norm):
-        support = torch.mm(input, self.weight)
-        output = torch.mm(adj_norm, support)
-        return output
+class DDGCAE:
+    def __init__(self, input_dim, hidden_dim, num_layers=4, corruption_prob=0.43, reg_lambda=1e-5, m_iter=4, num_clusters=8):
+        """
+        Initialize DDGCAE model parameters.
 
-class DDGCAE(nn.Module):
-    """
-    Deep Denoising Graph Convolutional Autoencoder with marginalization
-    """
-    def __init__(self, input_dim, hidden_dims=[64, 32, 16, 8], corruption_prob=0.43, reg_lambda=1e-5):
-        super(DDGCAE, self).__init__()
-        self.corruption_prob = corruption_prob
-        self.reg_lambda = reg_lambda
-        # Build stacked GCN layers
-        dims = [input_dim] + hidden_dims
-        self.gc_layers = nn.ModuleList()
-        for i in range(len(hidden_dims)):
-            self.gc_layers.append(GraphConvolution(dims[i], dims[i+1]))
-        # Output layer - reconstruction
-        self.reconstruct_layer = nn.Linear(hidden_dims[-1], input_dim)
-    
-    def corrupt_features(self, x):
+        Args:
+            input_dim (int): Dimension of input feature vectors.
+            hidden_dim (int): Dimension of hidden representations.
+            num_layers (int): Number of stacked GCN layers.
+            corruption_prob (float): Probability of corruption.
+            reg_lambda (float): Regularization coefficient.
+            m_iter (int): Number of marginalization iterations.
+            num_clusters (int): Number of clusters for spectral clustering.
         """
-        Randomly mask features with corruption probability
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.num_layers = num_layers
+        self.p = corruption_prob
+        self.lambda_ = reg_lambda
+        self.m_iter = m_iter
+        self.K = num_clusters
+        self.weights = []
+
+    def _normalize_adj(self, A):
+        """Compute symmetric normalized adjacency matrix."""
+        A_hat = A + np.eye(A.shape[0])
+        D_hat = np.diag(1.0 / np.sqrt(np.sum(A_hat, axis=1)))
+        return D_hat @ A_hat @ D_hat
+
+    def _corrupt_input(self, X):
+        """Randomly mask elements of X according to corruption probability."""
+        mask = np.random.binomial(1, 1 - self.p, size=X.shape)
+        return X * mask
+
+    def _compute_weights_closed_form(self, X, A_hat):
         """
-        noise = torch.rand_like(x)
-        mask = (noise > self.corruption_prob).float()
-        return x * mask
-    
-    def forward(self, x, adj_norm):
+        Compute optimal weight matrix using closed-form marginalization.
+
+        Args:
+            X (np.ndarray): Original feature matrix.
+            A_hat (np.ndarray): Normalized adjacency matrix.
+
+        Returns:
+            np.ndarray: Weight matrix W.
         """
-        Forward pass: input features x and normalized adjacency matrix adj_norm
+        S_p = X.T @ A_hat @ X
+        S_q = X.T @ A_hat.T @ A_hat @ X
+        E_P = S_p * (1 - self.p)
+        E_Q = S_q * (1 - self.p)**2 + self.lambda_ * np.eye(S_q.shape[0])
+        W = np.linalg.solve(E_Q, E_P.T).T
+        return W
+
+    def fit_transform(self, X, A):
         """
-        x_corrupted = self.corrupt_features(x)
-        out = x_corrupted
-        for i in range(len(self.gc_layers)):
-            out = self.gc_layers[i](out, adj_norm)
-            if i != len(self.gc_layers) - 1:
-                out = F.relu(out)
-            else:
-                out = torch.sigmoid(out)
-        # Reconstruction
-        reconstructed = self.reconstruct_layer(out)
-        reconstructed = torch.sigmoid(reconstructed)
-        return out, reconstructed
-    
-    def loss(self, x, reconstructed, weights):
+        Train DDGCAE and obtain final node embeddings.
+
+        Args:
+            X (np.ndarray): Input feature matrix (n x d).
+            A (np.ndarray): Adjacency matrix (n x n).
+
+        Returns:
+            np.ndarray: Node embeddings after final GCN layer.
         """
-        Reconstruction loss with Frobenius norm regularization
+        A_hat = self._normalize_adj(A)
+        Z = X.copy()
+
+        for layer in range(self.num_layers):
+            Z_c_list = [self._corrupt_input(Z) for _ in range(self.m_iter)]
+            Z_c_avg = np.mean(Z_c_list, axis=0)
+            W = self._compute_weights_closed_form(Z_c_avg, A_hat)
+            Z = A_hat @ Z @ W
+            self.weights.append(W)
+
+        return Z
+
+    def cluster(self, Z):
         """
-        mse_loss = F.mse_loss(reconstructed, x)
-        reg_loss = 0
-        for w in weights:
-            reg_loss += torch.norm(w, p='fro')**2
-        return mse_loss + self.reg_lambda * reg_loss
+        Apply spectral clustering on final latent representation.
+
+        Args:
+            Z (np.ndarray): Final node embedding matrix.
+
+        Returns:
+            np.ndarray: Cluster assignments for each node.
+        """
+        Z_linear = Z @ Z.T
+        Z_sym = 0.5 * (np.abs(Z) + np.abs(Z_linear))
+        clustering = SpectralClustering(n_clusters=self.K, affinity='precomputed', assign_labels='kmeans', random_state=0)
+        return clustering.fit_predict(Z_sym)
+
+    def get_weights(self):
+        """Return list of learned weight matrices."""
+        return self.weights
