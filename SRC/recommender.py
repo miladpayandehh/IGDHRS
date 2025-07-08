@@ -21,39 +21,47 @@
 # SOFTWARE.
 
 import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
 
-def assign_new_users_to_clusters(new_user_features, ddgcae_model, adj_norm, cluster_centroids):
+def estimate_rating_matrix(UC, CI):
     """
-    Assign new users to clusters based on cosine similarity between their embeddings and cluster centroids.
-    Args:
-        new_user_features: numpy array (n_new_users x feature_dim)
-        ddgcae_model: trained DDGCAE PyTorch model
-        adj_norm: normalized adjacency matrix (torch tensor)
-        cluster_centroids: numpy array (n_clusters x embedding_dim)
-    Returns:
-        assigned_clusters: list of cluster indices per user
-    """
-    ddgcae_model.eval()
-    with torch.no_grad():
-        features_tensor = torch.FloatTensor(new_user_features)
-        embeddings, _ = ddgcae_model(features_tensor, adj_norm)
-        embeddings_np = embeddings.cpu().numpy()
-    # Cosine similarity between embeddings and cluster centroids
-    sim = cosine_similarity(embeddings_np, cluster_centroids)
-    assigned_clusters = np.argmax(sim, axis=1)
-    return assigned_clusters
+    Estimate the final predicted user-item rating matrix R'.
 
-def estimate_item_ratings(cluster_labels, cluster_item_ratings, user_idx):
-    """
-    Estimate user ratings based on cluster averages.
     Args:
-        cluster_labels: cluster assignment array (user_idx -> cluster)
-        cluster_item_ratings: matrix of average ratings per cluster (clusters x items)
-        user_idx: index of the target user
+        UC (np.ndarray): User-cluster matrix (n_users x n_clusters)
+        CI (np.ndarray): Cluster-item matrix (n_clusters x n_items)
+
     Returns:
-        predicted_ratings: numpy array of predicted ratings for all items for the user
+        np.ndarray: Predicted rating matrix R' (n_users x n_items)
     """
-    cluster = cluster_labels[user_idx]
-    predicted_ratings = cluster_item_ratings[cluster]
-    return predicted_ratings
+    # Multiply UC and CI to get predicted ratings for each user from their cluster
+    R_hat = np.dot(UC, CI)
+    return R_hat
+
+
+def recommend_items(R_hat, original_R, top_k=10):
+    """
+    Generate top-k recommendations for each user.
+
+    Args:
+        R_hat (np.ndarray): Predicted rating matrix (n_users x n_items)
+        original_R (np.ndarray): Original user-item rating matrix (n_users x n_items), with zeros for unrated
+        top_k (int): Number of top items to recommend
+
+    Returns:
+        dict: Dictionary where keys are user indices and values are lists of recommended item indices
+    """
+    n_users, n_items = R_hat.shape
+    recommendations = {}
+
+    for u in range(n_users):
+        # Only consider items the user hasn't rated yet
+        unrated_items = np.where(original_R[u] == 0)[0]
+        predicted_scores = R_hat[u, unrated_items]
+
+        # Rank the unrated items based on predicted scores
+        top_indices = np.argsort(-predicted_scores)[:top_k]
+        recommended_items = unrated_items[top_indices]
+
+        recommendations[u] = recommended_items.tolist()
+
+    return recommendations
