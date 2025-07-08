@@ -1,81 +1,65 @@
 # IGDHRS: An Intelligent Graph-based Deep Hybrid Recommender System
 
-This repository contains the implementation of the IGDHRS model, a novel hybrid recommender system integrating graph-based user similarity, deep denoising graph convolutional autoencoder (DDGCAE), and automata-based adaptive thresholding for similarity graph construction. IGDHRS is designed to address sparsity and cold-start problems by combining auxiliary user/item features with graph-derived information.
+This repository contains the official implementation of **IGDHRS**, a novel hybrid recommender system that integrates graph-based user similarity, a Deep Denoising Graph Convolutional Autoencoder (DDGCAE), and an automata-driven adaptive thresholding mechanism. IGDHRS effectively addresses key challenges in recommendation systems, such as **data sparsity** and the **cold-start problem**, by combining auxiliary user/item metadata with graph-derived structural features.
 
----
+## 📌 Table of Contents
 
-## Table of Contents
-
-- [Project Overview](#project-overview)
-- [Features](#features)
+- [Overview](#overview)
+- [Key Features](#key-features)
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Usage](#usage)
-- [Output](#output)
-- [Model Details](#model-details)
+- [Outputs](#outputs)
+- [Model Components](#model-components)
 - [Evaluation](#evaluation)
 - [Citation](#citation)
 - [License](#license)
+- [Contact](#contact)
 
----
+## 📖 Overview
 
-## Project Overview
+IGDHRS constructs a **user similarity graph (SG)** using a dynamic threshold \( T_s \), which is automatically optimized via **Learning Automata (LA)** based on feedback from recommendation performance (e.g., RMSE, MAE, precision, recall). The system extracts **graph-based features**, merges them with **auxiliary user/item metadata**, and applies a **DDGCAE** to learn robust representations. Clustering and collaborative filtering are then applied to generate accurate recommendations.
 
-IGDHRS proposes a recommendation framework that constructs a user similarity graph (SG) with an adaptive similarity threshold dynamically tuned by a Learning Automata (LA). This balances graph sparsity and connectivity to optimize recommendation accuracy.
+## 🚀 Key Features
 
-Key contributions include:
+- Adaptive similarity threshold tuning via Learning Automata (LA)
+- Six comprehensive graph features: PageRank, Degree Centrality, Closeness Centrality, Betweenness Centrality, Load Centrality, and Average Neighbor Degree
+- Fusion of structural and auxiliary (demographic/content) features
+- Deep GCN-based autoencoder with corruption-aware denoising
+- Spectral clustering on graph embeddings
+- Handles both **cold-start** and **sparse data** scenarios
+- Fully modular, Pythonic, and configurable via `config.yaml`
 
-- **Similarity Graph Construction:** Uses LA to adapt the minimum similarity threshold \( T_s \) based on feedback from system performance (RMSE, MAE, precision, recall).
-- **Graph Feature Extraction:** Extracts six graph-based node features: PageRank, Degree Centrality, Closeness Centrality, Betweenness Centrality, Load Centrality, and Average Neighbor Degree.
-- **Feature Fusion:** Combines auxiliary user features (one-hot encoded) with graph features to form comprehensive node feature matrix.
-- **Deep Denoising Graph Convolutional Autoencoder (DDGCAE):** Learns robust node embeddings by reconstructing original features from corrupted inputs through spectral graph convolutions, with closed-form weight updates.
-- **Spectral Clustering:** Performs clustering on the learned embeddings to group users with similar preferences.
-- **Recommendation Generation:** Predicts item ratings for each user by averaging ratings within assigned clusters, enabling cold-start handling.
-
----
-
-## Features
-
-- Adaptive thresholding for user similarity graph via Learning Automata
-- Six comprehensive graph-based node features for enhanced representation
-- Deep GCN-based autoencoder for robust latent embeddings
-- Clustering based on learned embeddings for effective collaborative filtering
-- Handles cold-start problem via auxiliary feature integration
-- Modular and configurable Python implementation
-
----
-
-## Installation
+## ⚙️ Installation
 
 1. Clone the repository:
 
 ```bash
 git clone https://github.com/yourusername/IGDHRS.git
 cd IGDHRS
+```
 
-##Create a Python virtual environment (optional but recommended):
+2. (Optional) Create and activate a virtual environment:
 
+```bash
 python3 -m venv venv
-source venv/bin/activate  # Linux/Mac
-venv\Scripts\activate     # Windows
+source venv/bin/activate       # Linux/macOS
+venv\Scripts\activate          # Windows
+```
 
-## Install required packages:
+3. Install required dependencies:
 
+```bash
 pip install -r requirements.txt
+```
 
-Note: Key dependencies include numpy, scipy, scikit-learn, networkx, and PyYAML.
+> Note: Dependencies include: `numpy`, `scikit-learn`, `scipy`, `networkx`, `PyYAML`.
 
-##Configuration
+## ⚙️ Configuration
 
-Adjust model and runtime parameters via config.yaml. Key configurable options include:
+All parameters are defined in the `config.yaml` file. Key options include:
 
-Similarity threshold initial value and range
-Automata learning rates and type (LRP, LRεP, LRI)
-DDGCAE corruption probability, layers, and regularization
-Number of clusters for spectral clustering
-Paths to input data files
-
-Example snippet from config.yaml:
+```yaml
 graph:
   similarity_threshold_init: 0.015
   threshold_range: [0.001, 0.03]
@@ -90,62 +74,88 @@ ddgcae:
 
 clustering:
   num_clusters: 8
+```
 
-##Usage
+## ▶️ Usage
 
-The project contains modular Python scripts:
+The system is organized into modular components:
 
-src/graph_construction.py: Constructs the similarity graph using LA to adaptively update the similarity threshold.
-src/feature_extraction.py: Extracts graph-based and auxiliary features.
-src/ddgcae.py: Implements the deep denoising graph convolutional autoencoder for node embedding learning.
-src/clustering.py: Performs spectral clustering on learned embeddings and assigns new users to clusters.
-src/recommender.py: Generates the final rating prediction matrix and recommendation lists.
-main.py: Coordinates the full pipeline.
+| File | Description |
+|------|-------------|
+| `src/graph_construction.py` | Constructs the user similarity graph using adaptive LA mechanism |
+| `src/feature_extraction.py` | Extracts graph-based and auxiliary features |
+| `src/ddgcae.py` | Learns latent embeddings using the DDGCAE model |
+| `src/clustering.py` | Performs spectral clustering and new user assignment |
+| `src/recommender.py` | Generates predicted ratings and recommendation lists |
+| `main.py` | Orchestrates the full training and recommendation pipeline |
 
-To run the complete pipeline, simply execute: python main.py --config config.yaml
+To run the complete system:
 
-##Output
+```bash
+python main.py --config config.yaml
+```
 
-Learned user embeddings saved in outputs/embeddings.npy.
-Cluster assignments saved in outputs/clusters.npy.
-Predicted rating matrix saved in outputs/predicted_ratings.npy.
-Logs and intermediate files saved in outputs/logs/.
+## 📂 Outputs
 
-##Model Details
+The system produces the following output files (saved in `/outputs/` directory):
 
-#Similarity Graph Construction
-The Learning Automata selects one of three actions: Increase, Decrease, or Unchanged to update similarity threshold Ts.
-Feedback is derived from changes in RMSE, MAE, Precision, and Recall metrics.
-Probability updates follow the Linear Reward-Penalty (LRP) scheme or variants.
+- `embeddings.npy`: Final latent user embeddings
+- `clusters.npy`: Cluster assignment of users
+- `predicted_ratings.npy`: Full user–item prediction matrix
+- `logs/`: Evaluation logs and metadata
 
-#Feature Extraction
-Six graph features: PageRank, Degree Centrality, Closeness Centrality, Betweenness Centrality, Load Centrality, Average Neighbor Degree.
-Auxiliary features one-hot encoded and concatenated.
+## 🧠 Model Components
 
-#DDGCAE
-Multi-layer spectral graph convolutional network.
-Input corrupted multiple times for marginalization.
-Closed-form weight updates for efficient training.
-Final embeddings used for clustering.
+### Similarity Graph Construction
 
-#Clustering & Recommendation
-Spectral clustering on symmetrized kernel matrix.
-New users assigned based on cosine similarity.
-Predicted ratings estimated by averaging cluster member ratings.
+- Threshold \( T_s \) is adjusted using Learning Automata (LA)
+- Actions: `Increase`, `Decrease`, or `Unchanged`
+- Feedback: Based on RMSE, MAE, precision, recall
+- Variants: LRP, LRI, LRεP schemes supported
 
+### Feature Extraction
 
-#Evaluation
-Supports evaluation metrics: RMSE, MAE, Precision@k, Recall@k.
-Evaluation results logged per iteration.
-Early stopping based on validation performance is supported.
+- Structural features (x6): PR, DC, CC, BC, LC, AND
+- Auxiliary features: One-hot encoded demographics/items
+- Combined into a unified feature matrix \( F_t \)
 
-#License
-This project is licensed under the MIT License - see the LICENSE file for details.
+### DDGCAE: Deep Denoising Graph Convolutional Autoencoder
 
-##Contact
+- Inputs: corrupted node features \( \tilde{X} \), graph adjacency matrix \( A \)
+- Multi-layer GCN with spectral convolutions
+- Closed-form weight updates; no backpropagation
+- Robust embedding learning via corruption marginalization
 
-For questions or collaboration, please contact:
+### Clustering & Recommendation
 
-Milad Payandeh
-[milad71payandeh@gmail.com]
-[https://miladpayandeh.com/]
+- Spectral clustering on \( Z_2 = 0.5(|Z| + |ZZ^T|) \)
+- New users: assigned to nearest cluster using cosine similarity
+- Predictions: item scores estimated via cluster-wise rating averages
+
+## 📊 Evaluation
+
+- Supports: RMSE, MAE, Precision@k, Recall@k
+- Per-epoch evaluation logging
+- Early stopping supported (optional)
+
+## 📚 Citation
+
+If you use this repository in your research, please cite the corresponding paper:
+
+> _[Insert BibTeX or citation information here once published]_
+
+## 🪪 License
+
+This project is released under the [MIT License](LICENSE). You are free to use, modify, and distribute this work with attribution.
+
+## 📬 Contact
+
+For questions, suggestions, or collaboration:
+
+**Milad Payandeh**  
+📧 [milad71payandeh@gmail.com](mailto:milad71payandeh@gmail.com)  
+🌐 [https://miladpayandeh.com](https://miladpayandeh.com)
+
+---
+
+Thank you for using **IGDHRS**! If you find this repository helpful, please consider starring ⭐ the project.
