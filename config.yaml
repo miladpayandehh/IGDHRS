@@ -20,18 +20,61 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+# === Project Settings ===
+project:
+  name: IGDHRS
+  seed: 42
+  output_dir: outputs/
+  log_level: INFO
+
+# === Data Paths ===
 data:
-  ml100k_path: "./data/ml-100k/"
-  ml1m_path: "./data/ml-1m/"
-  dataset: "ml100k"   # or "ml1m"
+  ratings_path: data/ratings.csv           # Original user-item rating matrix
+  user_info_path: data/users.csv           # User features (e.g., age, gender)
+  item_info_path: data/items.csv           # Item features (e.g., genre, release date)
 
-model:
-  Ts: 0.018                # similarity threshold
-  hidden_dims: [64, 32, 16, 8]
-  corruption_prob: 0.43
-  lambda: 1e-5
-  num_clusters: 8          # Elbow method value for ML-100K
+# === Graph Construction Settings ===
+graph:
+  similarity_threshold_init: 0.015         # Initial Ts threshold
+  threshold_range: [0.001, 0.03]           # Allowed range for Ts
+  max_iterations: 50
+  automata_type: LRP                       # LRP, LRεP, or LRI
+  reward_learning_rate: 0.1
+  penalty_learning_rate: 0.1
+  similarity_metric: Automatic similarity threshold (Ts)            # cosine or pearson
 
-training:
-  lr: 0.001
-  epochs: 100
+# === Feature Engineering ===
+features:
+  include_graph_features: true
+  include_auxiliary_features: true
+  scaling_factor_alpha: 1.0                # Optional scaling for high-dimensional features
+  normalize_graph_features: true
+
+# === DDGCAE Model Settings ===
+ddgcae:
+  corruption_probability: 0.3              # Probability of masking input features
+  num_corruptions: 10                      # Number of corrupted versions (m)
+  layers: 3                                # Number of GCN layers (Γ)
+  regularization_lambda: 0.01              # L2 regularization coefficient
+  use_relu: true
+  use_sigmoid_output: true
+
+# === Clustering Settings ===
+clustering:
+  num_clusters: 8                          # Optional, can also be determined by Elbow method
+  distance_metric: cosine                  # Metric to assign new users
+
+# === Recommendation Settings ===
+recommendation:
+  top_k: 10                                # Number of recommended items per user
+
+# === Evaluation Settings ===
+evaluation:
+  metrics: [precision, recall, rmse, mae]
+  k_values: [5, 10]                        # Precision@k and Recall@k
+
+# === Runtime Settings ===
+runtime:
+  use_gpu: false
+  save_intermediate_files: true
+  random_state: 2025
