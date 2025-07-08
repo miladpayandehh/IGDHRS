@@ -1,4 +1,4 @@
-# IGDHRS: Intelligent Graph-based Deep Hybrid Recommender System
+# IGDHRS: An Intelligent Graph-based Deep Hybrid Recommender System
 
 This repository contains the implementation of the IGDHRS model, a novel hybrid recommender system integrating graph-based user similarity, deep denoising graph convolutional autoencoder (DDGCAE), and automata-based adaptive thresholding for similarity graph construction. IGDHRS is designed to address sparsity and cold-start problems by combining auxiliary user/item features with graph-derived information.
 
