@@ -4,17 +4,18 @@ This repository contains the official implementation of **IGDHRS**, a novel hybr
 
 ## 📚 Table of Contents
 
-- [📌 Overview](#📌-overview)
-- [🚀 Key Features](#🚀-key-features)
-- [⚙️ Installation](#⚙️-installation)
-- [🛠️ Configuration](#🛠️-configuration)
-- [▶️ Usage](#▶️-usage)
-- [📤 Outputs](#📤-outputs)
-- [🧠 Model Components](#🧠-model-components)
-- [📈 Evaluation](#📈-evaluation)
-- [📝 Citation](#📝-citation)
-- [📄 License](#📄-license)
-- [✉️ Contact](#✉️-contact)
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Usage](#usage)
+- [Outputs](#outputs)
+- [Model Components](#model-components)
+- [Evaluation](#evaluation)
+- [Citation](#citation)
+- [License](#license)
+- [Contact](#contact)
+
 
 
 ## 📖 Overview
