@@ -1,0 +1,208 @@
+# MIT License
+# 
+# Copyright (c) 2025 Milad Payandeh
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+
+import numpy as np
+import pandas as pd
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.metrics import mean_squared_error, mean_absolute_error, precision_score, recall_score
+from math import sqrt
+from sklearn.cluster import SpectralClustering
+from sklearn.metrics import pairwise_distances
+from sklearn.cluster import KMeans
+
+# --- Initial settings ---
+DATASET = "ml-100k"  # or "ml-1m"
+METRIC = "rmse"      # one of: rmse, mae, precision, recall
+MAX_ITER = 500
+TOP_K_MAX = 15  # Max clusters to try for Elbow
+
+# --- Learning Automata parameters ---
+n_actions = 100
+actions = np.linspace(0.001, 0.1, n_actions)
+P = np.ones(n_actions) / n_actions
+alpha = 0.05  # reward
+beta = 0.02   # penalty
+
+# --- Load ratings data ---
+def load_ratings():
+    path = f"datasets/{DATASET}/ratings.csv"
+    df = pd.read_csv(path)
+    return df.pivot(index='userId', columns='itemId', values='rating').fillna(0).values
+
+# --- Compute similarity matrix ---
+def build_similarity(rating_matrix, threshold):
+    sim = cosine_similarity(rating_matrix)
+    np.fill_diagonal(sim, 0)
+    sim[sim < threshold] = 0
+    return sim
+
+# --- Predict ratings ---
+def predict(sim_matrix, rating_matrix):
+    weighted_sum = sim_matrix @ rating_matrix
+    norm = np.abs(sim_matrix).sum(axis=1, keepdims=True)
+    norm[norm == 0] = 1e-8
+    return weighted_sum / norm
+
+# --- Evaluation function ---
+def evaluate(y_true, y_pred, metric):
+    mask = y_true > 0
+    if metric == "rmse":
+        return sqrt(mean_squared_error(y_true[mask], y_pred[mask]))
+    elif metric == "mae":
+        return mean_absolute_error(y_true[mask], y_pred[mask])
+    elif metric == "precision":
+        return precision_score(y_true[mask] >= 4, y_pred[mask] >= 4, zero_division=0)
+    elif metric == "recall":
+        return recall_score(y_true[mask] >= 4, y_pred[mask] >= 4, zero_division=0)
+    else:
+        raise ValueError("Unknown metric")
+
+# --- Learning Automata optimization loop ---
+def optimize_threshold(rating_matrix, metric):
+    best_score = float("inf") if metric in ["rmse", "mae"] else 0
+    best_Ts = None
+    global P
+
+    for _ in range(MAX_ITER):
+        action_idx = np.random.choice(range(n_actions), p=P)
+        Ts = actions[action_idx]
+
+        sim = build_similarity(rating_matrix, Ts)
+        pred = predict(sim, rating_matrix)
+        score = evaluate(rating_matrix, pred, metric)
+
+        improve = score < best_score if metric in ["rmse", "mae"] else score > best_score
+
+        if improve:
+            best_score = score
+            best_Ts = Ts
+            P[action_idx] += alpha * (1 - P[action_idx])
+        else:
+            P[action_idx] -= beta * P[action_idx]
+
+        P[:] = P / P.sum()
+
+    return best_Ts, best_score
+
+# --- DDGCAE Spectral Clustering ---
+def ddgcae_spectral_clustering(X, A, p, Gamma, lambd, n_clusters):
+    n, d = X.shape
+    I_n = np.eye(n)
+    tilde_A = A + I_n
+    tilde_D = np.diag(np.sum(tilde_A, axis=1))
+    D_inv_sqrt = np.linalg.inv(np.sqrt(tilde_D))
+    hat_A = D_inv_sqrt @ tilde_A @ D_inv_sqrt
+
+    Z = X.copy()
+    for l in range(Gamma):
+        mask = np.random.binomial(1, 1-p, size=Z.shape)
+        mask[:, -1] = 1
+        tilde_Z = Z * mask
+
+        U = np.array([1-p]*(Z.shape[1]-1) + [1])
+        S_q = Z.T @ hat_A.T @ hat_A @ Z
+        S_p = Z.T @ hat_A.T @ Z
+
+        E_Q = np.zeros_like(S_q)
+        for i in range(S_q.shape[0]):
+            for j in range(S_q.shape[1]):
+                if i == j:
+                    E_Q[i, j] = S_q[i, j] * U[i] + lambd
+                else:
+                    E_Q[i, j] = S_q[i, j] * (U[i]**2) + lambd
+        E_P = S_p * U
+
+        W = E_P @ np.linalg.inv(E_Q)
+        Z = hat_A @ Z @ W
+
+    Z0 = Z
+    Z1 = Z0 @ Z0.T
+    Z2 = 0.5 * (np.abs(Z0) + np.abs(Z1))
+
+    clustering = SpectralClustering(n_clusters=n_clusters, affinity='precomputed', assign_labels='kmeans', random_state=42)
+    labels = clustering.fit_predict(Z2)
+    return labels
+
+# --- Elbow method to find optimal number of clusters ---
+def elbow_method(Z2, max_k=TOP_K_MAX):
+    distortions = []
+    for k in range(1, max_k+1):
+        kmeans = KMeans(n_clusters=k, random_state=42).fit(Z2)
+        distortions.append(kmeans.inertia_)  # Sum of squared distances to closest cluster center
+    # Find elbow point by maximum second derivative (simple heuristic)
+    deltas = np.diff(distortions)
+    double_deltas = np.diff(deltas)
+    elbow_point = np.argmin(double_deltas) + 2  # +2 due to diff offsets
+    return elbow_point, distortions
+
+# --- Main execution ---
+if __name__ == "__main__":
+    print(f"Dataset: {DATASET}, Feedback: {METRIC}")
+    rating_matrix = load_ratings()
+    Ts_opt, score_opt = optimize_threshold(rating_matrix, METRIC)
+
+    print(f"Optimal similarity threshold T_s = {Ts_opt:.4f}")
+    print(f"Best {METRIC.upper()} = {score_opt:.4f}")
+
+    sim_matrix = build_similarity(rating_matrix, Ts_opt)
+
+    # Compute final embeddings via DDGCAE without clustering first
+    n, d = rating_matrix.shape
+    I_n = np.eye(n)
+    tilde_A = sim_matrix + I_n
+    tilde_D = np.diag(np.sum(tilde_A, axis=1))
+    D_inv_sqrt = np.linalg.inv(np.sqrt(tilde_D))
+    hat_A = D_inv_sqrt @ tilde_A @ D_inv_sqrt
+
+    Z = rating_matrix.copy()
+    p = 0.3
+    Gamma = 3
+    lambd = 0.1
+    for l in range(Gamma):
+        mask = np.random.binomial(1, 1-p, size=Z.shape)
+        mask[:, -1] = 1
+        U = np.array([1-p]*(Z.shape[1]-1) + [1])
+        S_q = Z.T @ hat_A.T @ hat_A @ Z
+        S_p = Z.T @ hat_A.T @ Z
+        E_Q = np.zeros_like(S_q)
+        for i in range(S_q.shape[0]):
+            for j in range(S_q.shape[1]):
+                if i == j:
+                    E_Q[i, j] = S_q[i, j] * U[i] + lambd
+                else:
+                    E_Q[i, j] = S_q[i, j] * (U[i]**2) + lambd
+        E_P = S_p * U
+        W = E_P @ np.linalg.inv(E_Q)
+        Z = hat_A @ Z @ W
+
+    Z0 = Z
+    Z1 = Z0 @ Z0.T
+    Z2 = 0.5 * (np.abs(Z0) + np.abs(Z1))
+
+    optimal_K, distortions = elbow_method(Z2)
+
+    print(f"Optimal number of clusters found by Elbow method: {optimal_K}")
+
+    labels = ddgcae_spectral_clustering(rating_matrix, sim_matrix, p, Gamma, lambd, optimal_K)
+
+    print(f"Spectral clustering labels (first 20 users): {labels[:20]}")
