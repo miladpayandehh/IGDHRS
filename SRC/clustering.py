@@ -21,102 +21,148 @@
 # SOFTWARE.
 
 import numpy as np
+import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.preprocessing import normalize
+from sklearn.metrics import mean_squared_error, mean_absolute_error, precision_score, recall_score
+from math import sqrt
+from sklearn.cluster import SpectralClustering
 
-def build_user_cluster_matrix(user_clusters, num_users, num_clusters):
-    """
-    Create the UC matrix showing each user's cluster assignment.
+# --- Initial settings ---
+DATASET = "ml-100k"  # or "ml-1m"
+METRIC = "rmse"      # one of: rmse, mae, precision, recall
+MAX_ITER = 500
+TOP_K = 10
 
-    Args:
-        user_clusters (np.ndarray): Cluster index for each user.
-        num_users (int): Total number of users.
-        num_clusters (int): Total number of clusters.
+# --- Learning Automata parameters ---
+n_actions = 100
+actions = np.linspace(0.001, 0.1, n_actions)
+P = np.ones(n_actions) / n_actions
+alpha = 0.05  # reward
+beta = 0.02   # penalty
 
-    Returns:
-        np.ndarray: Binary UC matrix of shape (num_users, num_clusters).
-    """
-    UC = np.zeros((num_users, num_clusters))
-    for u, c in enumerate(user_clusters):
-        UC[u, c] = 1
-    return UC
+# --- Load ratings data ---
+def load_ratings():
+    # Replace this path with the actual dataset path
+    path = f"datasets/{DATASET}/ratings.csv"
+    df = pd.read_csv(path)
+    return df.pivot(index='userId', columns='itemId', values='rating').fillna(0).values
 
+# --- Compute similarity matrix ---
+def build_similarity(rating_matrix, threshold):
+    sim = cosine_similarity(rating_matrix)
+    np.fill_diagonal(sim, 0)
+    sim[sim < threshold] = 0
+    return sim
 
-def build_cluster_item_matrix(R, UC, num_clusters):
-    """
-    Create the CI matrix containing average ratings for each item in each cluster.
+# --- Predict ratings ---
+def predict(sim_matrix, rating_matrix):
+    weighted_sum = sim_matrix @ rating_matrix
+    norm = np.abs(sim_matrix).sum(axis=1, keepdims=True)
+    norm[norm == 0] = 1e-8
+    return weighted_sum / norm
 
-    Args:
-        R (np.ndarray): User-item rating matrix (n_users x n_items).
-        UC (np.ndarray): User-cluster matrix (n_users x num_clusters).
-        num_clusters (int): Total number of clusters.
+# --- Evaluation function ---
+def evaluate(y_true, y_pred, metric):
+    mask = y_true > 0
+    if metric == "rmse":
+        return sqrt(mean_squared_error(y_true[mask], y_pred[mask]))
+    elif metric == "mae":
+        return mean_absolute_error(y_true[mask], y_pred[mask])
+    elif metric == "precision":
+        return precision_score(y_true[mask] >= 4, y_pred[mask] >= 4, zero_division=0)
+    elif metric == "recall":
+        return recall_score(y_true[mask] >= 4, y_pred[mask] >= 4, zero_division=0)
+    else:
+        raise ValueError("Unknown metric")
 
-    Returns:
-        np.ndarray: Cluster-item rating matrix (num_clusters x n_items).
-    """
-    num_items = R.shape[1]
-    CI = np.zeros((num_clusters, num_items))
+# --- Learning Automata optimization loop ---
+def optimize_threshold(rating_matrix, metric):
+    best_score = float("inf") if metric in ["rmse", "mae"] else 0
+    best_Ts = None
+    history = []
 
-    for c in range(num_clusters):
-        users_in_cluster = np.where(UC[:, c] == 1)[0]
-        if len(users_in_cluster) == 0:
-            continue
+    global P  # modify the global probability distribution
 
-        cluster_ratings = R[users_in_cluster]
-        with np.errstate(divide='ignore', invalid='ignore'):
-            avg_ratings = np.true_divide(cluster_ratings.sum(axis=0), (cluster_ratings != 0).sum(axis=0))
-            avg_ratings[np.isnan(avg_ratings)] = 0.0
-        CI[c] = avg_ratings
+    for _ in range(MAX_ITER):
+        action_idx = np.random.choice(range(n_actions), p=P)
+        Ts = actions[action_idx]
 
-    return CI
+        sim = build_similarity(rating_matrix, Ts)
+        pred = predict(sim, rating_matrix)
+        score = evaluate(rating_matrix, pred, metric)
+        history.append((Ts, score))
 
+        improve = score < best_score if metric in ["rmse", "mae"] else score > best_score
 
-def assign_new_user_to_cluster(user_aux_vector, cluster_centroids):
-    """
-    Assign a new user to the nearest cluster based on cosine similarity.
+        if improve:
+            best_score = score
+            best_Ts = Ts
+            P[action_idx] += alpha * (1 - P[action_idx])
+        else:
+            P[action_idx] -= beta * P[action_idx]
 
-    Args:
-        user_aux_vector (np.ndarray): 1D feature vector of the new user (after projection).
-        cluster_centroids (np.ndarray): Cluster center vectors.
+        P[:] = P / P.sum()
 
-    Returns:
-        int: Index of the most similar cluster.
-    """
-    user_vec = normalize(user_aux_vector.reshape(1, -1))
-    centroids_norm = normalize(cluster_centroids)
-    similarities = cosine_similarity(user_vec, centroids_norm)
-    return np.argmax(similarities)
+    return best_Ts, best_score, history
 
+# --- DDGCAE Spectral Clustering ---
+def ddgcae_spectral_clustering(X, A, p, Gamma, lambd, K):
+    n, d = X.shape
+    I_n = np.eye(n)
+    tilde_A = A + I_n
+    tilde_D = np.diag(np.sum(tilde_A, axis=1))
+    D_inv_sqrt = np.linalg.inv(np.sqrt(tilde_D))
+    hat_A = D_inv_sqrt @ tilde_A @ D_inv_sqrt
 
-def rank_items_for_cluster(cluster_index, CI, top_k=10):
-    """
-    Return top-k items ranked for a given cluster based on cluster-item ratings.
+    Z = X.copy()
+    for l in range(Gamma):
+        mask = np.random.binomial(1, 1-p, size=Z.shape)
+        mask[:, -1] = 1
+        tilde_Z = Z * mask
 
-    Args:
-        cluster_index (int): Index of the target cluster.
-        CI (np.ndarray): Cluster-item matrix.
-        top_k (int): Number of top items to return.
+        U = np.array([1-p]*(Z.shape[1]-1) + [1])
+        S_q = Z.T @ hat_A.T @ hat_A @ Z
+        S_p = Z.T @ hat_A.T @ Z
 
-    Returns:
-        np.ndarray: Indices of top-k recommended items.
-    """
-    scores = CI[cluster_index]
-    top_items = np.argsort(-scores)[:top_k]
-    return top_items
+        E_Q = np.zeros_like(S_q)
+        for i in range(S_q.shape[0]):
+            for j in range(S_q.shape[1]):
+                if i == j:
+                    E_Q[i, j] = S_q[i, j] * U[i] + lambd
+                else:
+                    E_Q[i, j] = S_q[i, j] * (U[i]**2) + lambd
+        E_P = S_p * U
 
+        W = E_P @ np.linalg.inv(E_Q)
+        Z = hat_A @ Z @ W
 
-def rank_new_items(new_item_features, existing_item_features, top_k=10):
-    """
-    Rank new items based on their similarity to existing items using content features.
+    Z0 = Z
+    Z1 = Z0 @ Z0.T
+    Z2 = 0.5 * (np.abs(Z0) + np.abs(Z1))
 
-    Args:
-        new_item_features (np.ndarray): Features of new items (m x d).
-        existing_item_features (np.ndarray): Features of existing items (n x d).
-        top_k (int): Number of top similar existing items to find for each new item.
+    clustering = SpectralClustering(n_clusters=K, affinity='precomputed', assign_labels='kmeans', random_state=42)
+    labels = clustering.fit_predict(Z2)
+    return labels
 
-    Returns:
-        list: List of top-k indices for each new item.
-    """
-    similarities = cosine_similarity(new_item_features, existing_item_features)
-    rankings = [np.argsort(-row)[:top_k] for row in similarities]
-    return rankings
+# --- Main execution ---
+if __name__ == "__main__":
+    print(f"Dataset: {DATASET}, Feedback: {METRIC}")
+    rating_matrix = load_ratings()
+    Ts_opt, score_opt, logs = optimize_threshold(rating_matrix, METRIC)
+
+    print(f"Optimal similarity threshold T_s = {Ts_opt:.4f}")
+    print(f"Best {METRIC.upper()} = {score_opt:.4f}")
+
+    # Use optimized threshold to build similarity matrix for clustering
+    sim_matrix = build_similarity(rating_matrix, Ts_opt)
+
+    # Apply DDGCAE spectral clustering
+    # Parameters: p = corruption probability, Gamma = number of stacked layers, lambd = regularization, K = clusters
+    p = 0.3
+    Gamma = 3
+    lambd = 0.1
+    K = TOP_K
+
+    labels = ddgcae_spectral_clustering(rating_matrix, sim_matrix, p, Gamma, lambd, K)
+
+    print(f"Spectral clustering labels (first 20 users): {labels[:20]}")
