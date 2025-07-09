@@ -23,60 +23,93 @@
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from sklearn.metrics import mean_squared_error
-from src.graph_construction import build_similarity_graph
-from src.recommender import estimate_ratings_from_graph
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.metrics import mean_squared_error, mean_absolute_error, precision_score, recall_score
+from math import sqrt
+import random
 
-# Define evaluation metric
-def rmse(y_true, y_pred):
-    return np.sqrt(mean_squared_error(y_true, y_pred))
+# --- Initial settings ---
+DATASET = "ml-100k"  # or "ml-1m"
+METRIC = "rmse"  # one of: rmse, mae, precision, recall
+MAX_ITER = 500
+TOP_K = 10
 
-# Sample thresholds to test
-thresholds = np.linspace(0.005, 0.03, 15)
+# --- Learning Automata parameters ---
+n_actions = 100
+actions = np.linspace(0.001, 0.1, n_actions)
+P = np.ones(n_actions) / n_actions
+alpha = 0.05  # reward
+beta = 0.02   # penalty
 
-# Placeholder results
-results = []
+# --- Load ratings data ---
+def load_ratings():
+    # Note: Replace this path with the actual dataset path
+    path = f"datasets/{DATASET}/ratings.csv"
+    df = pd.read_csv(path)
+    return df.pivot(index='userId', columns='itemId', values='rating').fillna(0).values
 
-# Load your dataset
-dataset_name = "ml-100k"
-ratings_df = pd.read_csv(f"data/{dataset_name}/ratings.csv")
+# --- Compute similarity matrix ---
+def build_similarity(rating_matrix, threshold):
+    sim = cosine_similarity(rating_matrix)
+    np.fill_diagonal(sim, 0)
+    sim[sim < threshold] = 0
+    return sim
 
-# Main loop over thresholds
-for ts in thresholds:
-    print(f"Evaluating for T_s = {ts:.4f} ...")
-    
-    # 1. Build graph with current threshold
-    G = build_similarity_graph(ratings_df, threshold=ts)
-    
-    # 2. Estimate rating matrix (dummy function, replace as needed)
-    R_true, R_pred = estimate_ratings_from_graph(G, ratings_df)
-    
-    # 3. Sparsity = (1 - #edges / max_possible_edges)
-    n = len(G.nodes)
-    max_edges = n * (n - 1) / 2
-    sparsity = 1 - (len(G.edges) / max_edges)
-    
-    # 4. Evaluate RMSE
-    score = rmse(R_true, R_pred)
-    
-    results.append({
-        "T_s": ts,
-        "Sparsity": sparsity,
-        "RMSE": score
-    })
+# --- Predict ratings ---
+def predict(sim_matrix, rating_matrix):
+    weighted_sum = sim_matrix @ rating_matrix
+    norm = np.abs(sim_matrix).sum(axis=1, keepdims=True)
+    norm[norm == 0] = 1e-8
+    return weighted_sum / norm
 
-# Convert to DataFrame and save
-df_results = pd.DataFrame(results)
-df_results.to_csv("outputs/threshold_analysis_results.csv", index=False)
+# --- Evaluation function ---
+def evaluate(y_true, y_pred, metric):
+    mask = y_true > 0
+    if metric == "rmse":
+        return sqrt(mean_squared_error(y_true[mask], y_pred[mask]))
+    elif metric == "mae":
+        return mean_absolute_error(y_true[mask], y_pred[mask])
+    elif metric == "precision":
+        return precision_score(y_true[mask] >= 4, y_pred[mask] >= 4, zero_division=0)
+    elif metric == "recall":
+        return recall_score(y_true[mask] >= 4, y_pred[mask] >= 4, zero_division=0)
+    else:
+        raise ValueError("Unknown metric")
 
-# Plot the RMSE vs. T_s
-plt.figure(figsize=(8, 5))
-plt.plot(df_results["T_s"], df_results["RMSE"], marker='o', color='teal')
-plt.xlabel("Similarity Threshold $T_s$")
-plt.ylabel("RMSE")
-plt.title("Impact of $T_s$ on RMSE (ML-100K)")
-plt.grid(True)
-plt.tight_layout()
-plt.savefig("outputs/Fig2.png")
-plt.close()
+# --- Learning Automata optimization loop ---
+def optimize_threshold(rating_matrix, metric):
+    best_score = float("inf") if metric in ["rmse", "mae"] else 0
+    best_Ts = None
+    history = []
+
+    for _ in range(MAX_ITER):
+        action_idx = np.random.choice(range(n_actions), p=P)
+        Ts = actions[action_idx]
+
+        sim = build_similarity(rating_matrix, Ts)
+        pred = predict(sim, rating_matrix)
+        score = evaluate(rating_matrix, pred, metric)
+        history.append((Ts, score))
+
+        # Positive or negative feedback
+        improve = score < best_score if metric in ["rmse", "mae"] else score > best_score
+
+        if improve:
+            best_score = score
+            best_Ts = Ts
+            P[action_idx] += alpha * (1 - P[action_idx])
+        else:
+            P[action_idx] -= beta * P[action_idx]
+        
+        P[:] = P / P.sum()
+
+    return best_Ts, best_score, history
+
+# --- Main execution ---
+if __name__ == "__main__":
+    print(f"Dataset: {DATASET}, Feedback: {METRIC}")
+    rating_matrix = load_ratings()
+    Ts_opt, score_opt, logs = optimize_threshold(rating_matrix, METRIC)
+
+    print(f"Optimal T_s = {Ts_opt:.4f}")
+    print(f"Best {METRIC.upper()} = {score_opt:.4f}")
