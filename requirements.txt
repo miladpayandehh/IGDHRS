@@ -1,5 +1,8 @@
 numpy
 scipy
 scikit-learn
-torch
+networkx
 pyyaml
+matplotlib
+pandas
+torch
